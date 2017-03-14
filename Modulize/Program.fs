@@ -15,6 +15,8 @@ module Os =
 module Subprocess = 
     exception ProcessFailedException of string*string*string[]
     
+    let mutable Verbose = false
+
     let patchProcInfo (pi: ProcessStartInfo) = 
         pi.UseShellExecute <- false
         pi.RedirectStandardOutput <- true
@@ -24,7 +26,8 @@ module Subprocess =
 
         
     let Exec cmd args =
-        printfn "> %s %s" cmd args
+        if Verbose then 
+            printfn "> %s %s" cmd args
         use proc = new Process()
         patchProcInfo proc.StartInfo
         let out = ResizeArray<string>()
@@ -153,6 +156,7 @@ type CLIArguments =
     | Targets
     | Files
     | Leftover
+    | Verbose
 with
     interface IArgParserTemplate with
         member s.Usage = 
@@ -166,6 +170,7 @@ with
             | Targets -> "Show rules triggered by changed modules"
             | Files -> "Show list of modules and associated files"
             | Leftover -> "Show unrecognized files"
+            | Verbose -> "Log diagnostics to console"
 
 
 
@@ -173,6 +178,9 @@ exception InvalidCli of string
 
 let handleCli (res: ParseResults<CLIArguments>) =
     let dir = res.GetResult(<@ Dir @>, ".")
+
+    if res.Contains <@ Verbose @> then
+        Subprocess.Verbose <- true
 
     let ensureFile argname f = 
         match f with
