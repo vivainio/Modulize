@@ -1,0 +1,7 @@
+source http://10.9.10.11:8081/artifactory/api/nuget/P2P-nuget
+source https://www.nuget.org/api/v2/
+framework >= net452
+
+nuget Argu 3.2.0
+nuget FSharp.Configuration
+nuget System.ValueTuple 4.3.0

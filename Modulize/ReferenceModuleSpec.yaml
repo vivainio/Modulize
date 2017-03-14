@@ -1,0 +1,18 @@
+﻿Modules:
+  -
+    Mod: AMod
+    Dirs: [ my/dir1, my/dir2 ]
+  -
+    Mod: BMod
+    Dirs: [ my/dir3 ]
+  -
+    Mod: RegexMod
+    Dirs: [ .*someregex.* ] 
+
+Rules:
+  -
+    Target: JobA
+    If: [ AMod, BMod ]
+  -
+    Target: JobB
+    If: [ RegexMod ]
