@@ -108,9 +108,9 @@ type RuleSpec = {
 with
     static member FromYaml(ent: RuleYaml) = 
         let op, listprop = match ent with
-                       | _ when ent.If.Count > 0 -> If, ent.If
-                       | _ when ent.IfAnythingElse.Count > 0 -> IfAnythingElse,  ent.IfAnythingElse
-
+                           | _ when ent.If.Count > 0 -> If, ent.If
+                           | _ when ent.IfAnythingElse.Count > 0 -> IfAnythingElse,  ent.IfAnythingElse
+                           | _ -> failwithf "Unknown rule %A" ent
                        
         {
             Target = ent.Target
