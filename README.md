@@ -1,6 +1,13 @@
 # Modulize
 Map source trees changes (from git) to dir based modules, and map those to "build tasks"
 
+## Install
+
+```
+$ zippim get https://github.com/vivainio/Modulize/releases/download/v0.1.1/Modulize.zip
+```
+
+## Usage
 ```
 USAGE: modulize.exe [--help] [--from <string>] [--to <string>] [--commit <string>] --config <string>
                     [--dir <string>] [--modules] [--targets] [--files] [--leftover]
