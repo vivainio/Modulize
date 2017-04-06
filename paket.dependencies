@@ -2,5 +2,5 @@ source https://www.nuget.org/api/v2/
 framework >= net452
 
 nuget Argu 3.2.0
+nuget SharpYaml
 nuget System.ValueTuple 4.3.0
-nuget YamlDotNet

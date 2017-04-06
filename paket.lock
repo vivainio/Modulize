@@ -2,5 +2,5 @@ FRAMEWORK: >= NET452
 NUGET
   remote: https://www.nuget.org/api/v2
     Argu (3.2)
+    SharpYaml (1.6.1)
     System.ValueTuple (4.3)
-    YamlDotNet (4.1)

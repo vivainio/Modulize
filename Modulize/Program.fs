@@ -3,8 +3,8 @@ open System.Diagnostics
 open System
 open System.Text.RegularExpressions
 open Argu
-open YamlDotNet.Core
-open YamlDotNet.Serialization
+open SharpYaml.Serialization
+open SharpYaml
 
 module Os = 
     let WithDir p =
@@ -123,8 +123,8 @@ let getReader fname =
     let file = new FileStream(fname, FileMode.Open, FileAccess.Read)
     new StreamReader(file) 
 
-let readYaml (pth: string) = 
-    let rd = new Deserializer()
+let readYaml (pth: string) =
+    let rd = new SharpYaml.Serialization.Serializer()
     use reader = getReader pth
     try
         let res = rd.Deserialize<ConfigYaml> reader
@@ -143,7 +143,6 @@ let readConfig (pth: string) =
     mods, rules
 
 let dirtyFilesFromGit (fromBranch: string) (toBranch: string) =
-
     (Subprocess.CheckOutput "git" (sprintf "diff --name-only %s...%s" toBranch fromBranch)) 
 
 module Git =
