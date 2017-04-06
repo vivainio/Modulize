@@ -1,9 +1,10 @@
 ﻿open System.IO
 open System.Diagnostics
 open System
-open FSharp.Configuration
 open System.Text.RegularExpressions
 open Argu
+open YamlDotNet.Core
+open YamlDotNet.Serialization
 
 module Os = 
     let WithDir p =
@@ -63,29 +64,82 @@ module String =
             | l -> yield l
 }
 
-type ModuleConfig = YamlConfig<"./ReferenceModuleSpec.yaml">
+type ModuleYaml() =
+    member val Mod = "" with get,set
+    member val Dirs = ResizeArray<string>() with get,set
+
 
 type ModuleSpec = {
     Name: string
     Dirs: string[]
 }
+with
+    static member FromYaml(ent: ModuleYaml) =
+        {
+            Name = ent.Mod
+            Dirs = ent.Dirs.ToArray()
+        }
+
+
+type RuleOp =
+| If 
+| IfAnythingElse
+
+type RuleYaml() = 
+    member val Target = "" with get,set
+    member val Op = "" with get,set
+    member val Mods = ResizeArray<string>() with get,set
+    member val If = ResizeArray<string>() with get,set
+    member val IfAnythingElse = ResizeArray<string>() with get,set
+
+
+
+type ConfigYaml() =
+    member val Modules = ResizeArray<ModuleYaml>() with get,set
+    member val Rules = ResizeArray<RuleYaml>() with get,set
+
+
 
 type RuleSpec = {
     Target: string
-    If: string[]
+    Op: RuleOp
+    Mods: string[]
 }
+with
+    static member FromYaml(ent: RuleYaml) = 
+        let op, listprop = match ent with
+                       | _ when ent.If.Count > 0 -> If, ent.If
+                       | _ when ent.IfAnythingElse.Count > 0 -> IfAnythingElse,  ent.IfAnythingElse
+
+                       
+        {
+            Target = ent.Target
+            Mods = listprop.ToArray()
+            Op = op 
+        }
+
+
+let getReader fname =
+    let file = new FileStream(fname, FileMode.Open, FileAccess.Read)
+    new StreamReader(file) 
+
+let readYaml (pth: string) = 
+    let rd = new Deserializer()
+    use reader = getReader pth
+    try
+        let res = rd.Deserialize<ConfigYaml> reader
+        Some res
+    with 
+    | :? YamlException as e -> 
+        printfn "Yaml parse error:\n%s" e.Message
+        None
 
 
 let readConfig (pth: string) =
-    let c = ModuleConfig()
-    c.Load( pth )
-    let mods = c.Modules 
-                |> Seq.map (fun m -> { Name = m.Mod; Dirs = m.Dirs
-                                                            |> Seq.map (fun d -> d.ToLowerInvariant()) 
-                                                            |> Array.ofSeq })
-                |> Array.ofSeq
-    let rules =  c.Rules
-                 |> Seq.map (fun r -> { Target = r.Target; If = r.If |> Array.ofSeq })
+    let yaml = readYaml pth
+
+    let mods = yaml.Value.Modules |> Seq.map ModuleSpec.FromYaml
+    let rules = yaml.Value.Rules |> Seq.map RuleSpec.FromYaml
     mods, rules
 
 let dirtyFilesFromGit (fromBranch: string) (toBranch: string) =
@@ -111,9 +165,17 @@ let matchRules (mods: string[]) (rules: RuleSpec seq) =
     let modSet = Set.ofArray mods
     seq {
         for r in rules do
-            let tries = Set.ofArray r.If
-            if not <| Set.isEmpty (Set.intersect tries modSet) then
-                yield r.Target
+            let tries = Set.ofArray r.Mods
+
+            match r.Op with 
+            | If -> 
+                if not <| Set.isEmpty (Set.intersect tries modSet) then
+                    yield r.Target
+            | IfAnythingElse -> 
+                if not <| Set.isEmpty (Set.difference modSet tries) then
+                    yield r.Target
+
+
     }
     
 let scanModules modSpec fromBranch toBranch = 
@@ -191,7 +253,7 @@ let handleCli (res: ParseResults<CLIArguments>) =
 
     let modSpec, ruleSpec = readConfig (res.TryGetResult(<@ Config @>) |> ensureFile "--config")
 
-    let d = Os.WithDir dir
+    use d = Os.WithDir dir
 
     let mutable fromRef = res.GetResult( <@ From @>, "")
     let mutable toRef = res.GetResult( <@ To @>, "")
@@ -223,7 +285,6 @@ let handleCli (res: ParseResults<CLIArguments>) =
 [<EntryPoint>]
 let main argv =
     let parser = ArgumentParser.Create<CLIArguments>(programName = "modulize.exe")
-
     try
         let res = parser.Parse argv
         handleCli res
