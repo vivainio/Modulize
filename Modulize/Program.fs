@@ -3,31 +3,30 @@ open System.Diagnostics
 open System
 open System.Text.RegularExpressions
 open Argu
-open SharpYaml.Serialization
 open SharpYaml
 
-module Os = 
+module Os =
     let WithDir p =
         let old = Directory.GetCurrentDirectory()
         Directory.SetCurrentDirectory(p)
         {new IDisposable with
             member x.Dispose() = Directory.SetCurrentDirectory old}
 
-module Subprocess = 
+module Subprocess =
     exception ProcessFailedException of string*string*string[]
-    
+
     let mutable Verbose = false
 
-    let patchProcInfo (pi: ProcessStartInfo) = 
+    let patchProcInfo (pi: ProcessStartInfo) =
         pi.UseShellExecute <- false
         pi.RedirectStandardOutput <- true
         pi.RedirectStandardError <- true
         pi.WindowStyle <- ProcessWindowStyle.Hidden
         pi.WorkingDirectory <- Directory.GetCurrentDirectory()
 
-        
+
     let Exec cmd args =
-        if Verbose then 
+        if Verbose then
             printfn "> %s %s" cmd args
         use proc = new Process()
         patchProcInfo proc.StartInfo
@@ -38,14 +37,14 @@ module Subprocess =
         proc.StartInfo.Arguments <- args
 
         proc.OutputDataReceived.Add(fun d -> out.Add(d.Data))
-        proc.ErrorDataReceived.Add(fun d -> err.Add(d.Data)) 
+        proc.ErrorDataReceived.Add(fun d -> err.Add(d.Data))
 
         let started = proc.Start()
         proc.BeginOutputReadLine()
         proc.BeginErrorReadLine()
         proc.WaitForExit()
         let skipNulls = Seq.filter (fun e -> not <| obj.ReferenceEquals(e, null))
-        proc.ExitCode, Array.ofSeq <| skipNulls out , Array.ofSeq <| skipNulls err  
+        proc.ExitCode, Array.ofSeq <| skipNulls out , Array.ofSeq <| skipNulls err
 
     let CheckOutput cmd args =
         let status, out, err = Exec cmd args
@@ -59,7 +58,7 @@ module String =
         let mutable exit = false
         while not exit do
             let line = rd.ReadLine()
-            match line with 
+            match line with
             | null -> exit <- true
             | l -> yield l
 }
@@ -82,13 +81,15 @@ with
 
 
 type RuleOp =
-| If 
+| If
 | IfAnythingElse
+| EmptyRule
 
-type RuleYaml() = 
-    member val Target = "" with get,set
-    member val Op = "" with get,set
-    member val Mods = ResizeArray<string>() with get,set
+type RuleYaml() =
+    //member val Target = "" with get,set
+    member val Targets = ResizeArray<string>() with get, set
+    //member val Op = "" with get,set
+    //member val Mods = ResizeArray<string>() with get,set
     member val If = ResizeArray<string>() with get,set
     member val IfAnythingElse = ResizeArray<string>() with get,set
 
@@ -101,27 +102,27 @@ type ConfigYaml() =
 
 
 type RuleSpec = {
-    Target: string
+    Targets: string[]
     Op: RuleOp
     Mods: string[]
 }
 with
-    static member FromYaml(ent: RuleYaml) = 
+    static member FromYaml(ent: RuleYaml) =
         let op, listprop = match ent with
                            | _ when ent.If.Count > 0 -> If, ent.If
                            | _ when ent.IfAnythingElse.Count > 0 -> IfAnythingElse,  ent.IfAnythingElse
-                           | _ -> failwithf "Unknown rule %A" ent
-                       
+                           | _ -> EmptyRule, ResizeArray<_>()
+
         {
-            Target = ent.Target
+            Targets = ent.Targets.ToArray()
             Mods = listprop.ToArray()
-            Op = op 
+            Op = op
         }
 
 
 let getReader fname =
     let file = new FileStream(fname, FileMode.Open, FileAccess.Read)
-    new StreamReader(file) 
+    new StreamReader(file)
 
 let readYaml (pth: string) =
     let rd = new SharpYaml.Serialization.Serializer()
@@ -129,8 +130,8 @@ let readYaml (pth: string) =
     try
         let res = rd.Deserialize<ConfigYaml> reader
         Some res
-    with 
-    | :? YamlException as e -> 
+    with
+    | :? YamlException as e ->
         printfn "Yaml parse error:\n%s" e.Message
         None
 
@@ -143,18 +144,18 @@ let readConfig (pth: string) =
     mods, rules
 
 let dirtyFilesFromGit (fromBranch: string) (toBranch: string) =
-    (Subprocess.CheckOutput "git" (sprintf "diff --name-only %s...%s" toBranch fromBranch)) 
+    (Subprocess.CheckOutput "git" (sprintf "diff --name-only %s...%s" toBranch fromBranch))
 
 module Git =
     let ParseCommit (ref: string) =
         let out = Subprocess.CheckOutput "git" (sprintf "show %s" ref)
-        out 
-        |> Array.choose(fun l -> 
+        out
+        |> Array.choose(fun l ->
                         let matched = Regex.Match(l, @"^(\w+):(.*)$")
                         if (not matched.Success) then None else
-                            (matched.Groups.[1].Value, matched.Groups.[2].Value.Trim()) |> Some               
-                        ) 
-    let ParseMergeCommit (ref: string) = 
+                            (matched.Groups.[1].Value, matched.Groups.[2].Value.Trim()) |> Some
+                        )
+    let ParseMergeCommit (ref: string) =
         let parsed = ParseCommit ref
         let mergeval = parsed |> Array.find (fun e -> (fst e) = "Merge") |> snd |> fun s -> s.Split(' ') |> fun arr -> (arr.[1], arr.[0])
         mergeval
@@ -166,48 +167,65 @@ let matchRules (mods: string[]) (rules: RuleSpec seq) =
         for r in rules do
             let tries = Set.ofArray r.Mods
 
-            match r.Op with 
-            | If -> 
+            match r.Op with
+            | If ->
                 if not <| Set.isEmpty (Set.intersect tries modSet) then
-                    yield r.Target
-            | IfAnythingElse -> 
+                    yield! r.Targets
+            | IfAnythingElse ->
                 if not <| Set.isEmpty (Set.difference modSet tries) then
-                    yield r.Target
-
+                    yield! r.Targets
+            | EmptyRule ->
+                ()
 
     }
-    
-let scanModules modSpec fromBranch toBranch = 
+
+let scanModules modSpec fromBranch toBranch =
     let root = Subprocess.CheckOutput "git" "rev-parse --show-toplevel" |> Array.head
-    let files = dirtyFilesFromGit fromBranch toBranch 
+    let files = dirtyFilesFromGit fromBranch toBranch
                 |> Array.map (fun f -> f.ToLowerInvariant())
                 |> Set.ofArray
 
-    //let mods, rules = readConfig configFile
     let scanForOne (trie: string) (arr: string Set) =
         arr |> Set.filter (fun l -> not (l.StartsWith trie || Regex.IsMatch (l, trie, RegexOptions.IgnoreCase)))
 
     let scanForMany (tries: string[]) (arr: string Set) =
         tries |> Array.fold (fun remainingArr s -> scanForOne s remainingArr) arr
-    
+
     let mutable remaining = files
     let emittedModules =
         seq {
             for m in modSpec do
                 let filtered = scanForMany m.Dirs remaining
                 let diff = Set.difference remaining filtered
-                if filtered.Count < remaining.Count then 
+                if filtered.Count < remaining.Count then
                     yield (m.Name, diff)
                 remaining <- filtered
         } |> Array.ofSeq
-    
+
     emittedModules, remaining, files
 
-let findTargets ruleSpec modules = 
-    let targets = matchRules (modules |> Array.map fst) ruleSpec |> Array.ofSeq
+let checkRules ruleSpec (modSpec: ModuleSpec seq) =
+    let referencedModules =
+        ruleSpec
+        |> Seq.collect (fun r -> r.Mods)
+        |> Set.ofSeq
+    let existingModules =
+        modSpec
+        |> Seq.map (fun m -> m.Name)
+        |> Set.ofSeq
+
+    let unknownModules =
+        Set.difference referencedModules existingModules
+    unknownModules |> Seq.iter (printfn "Uknown module: %s")
+let findTargets ruleSpec modules =
+    let targets =
+        matchRules (modules
+        |> Array.map fst) ruleSpec
+        |> Array.ofSeq
+        |> Array.distinct
     targets
 
-type CLIArguments = 
+type CLIArguments =
     | From of string
     | To of string
     | Commit of string
@@ -220,8 +238,8 @@ type CLIArguments =
     | Verbose
 with
     interface IArgParserTemplate with
-        member s.Usage = 
-            match s with 
+        member s.Usage =
+            match s with
             | From _ -> "Source branch"
             | To _ -> "Target branch"
             | Commit _ -> "Specify merge commit to analyze"
@@ -243,9 +261,9 @@ let handleCli (res: ParseResults<CLIArguments>) =
     if res.Contains <@ Verbose @> then
         Subprocess.Verbose <- true
 
-    let ensureFile argname f = 
+    let ensureFile argname f =
         match f with
-        | None -> 
+        | None ->
             failwithf "Need to specify argument '%s'" argname
         | Some f ->
             if File.Exists f then f else failwithf "Argument %s, file doesn't exist: %s" argname f
@@ -260,15 +278,15 @@ let handleCli (res: ParseResults<CLIArguments>) =
     let mergeCommit = res.TryGetResult <@ Commit @>
     if (mergeCommit.IsSome) then
         let (p1, _) = Git.ParseMergeCommit mergeCommit.Value
-        
+
         fromRef <- p1
         toRef <- mergeCommit.Value
 
     if fromRef = "" || toRef = "" then
         raise <| InvalidCli("Need to specify either --commit or --from and --to")
-        
-    let modules, leftovers, files = scanModules modSpec fromRef toRef
 
+    let modules, leftovers, files = scanModules modSpec fromRef toRef
+    checkRules ruleSpec modSpec
     if res.Contains <@ Modules @> then
         modules |> Seq.iter (fst >> (printfn "%s"))
     if res.Contains <@ Targets @> then
@@ -289,7 +307,7 @@ let main argv =
         handleCli res
         0
     with
-        | :? ArguParseException as e -> 
+        | :? ArguParseException as e ->
             printfn "%s" e.Message
             1
         | InvalidCli(message) ->
@@ -297,8 +315,8 @@ let main argv =
             1
 
         | Subprocess.ProcessFailedException(cmd, args, err) ->
-            printfn "FAILED: %s %s\n%A" cmd args err 
+            printfn "FAILED: %s %s\n%A" cmd args err
             2
 
 
-            
+
