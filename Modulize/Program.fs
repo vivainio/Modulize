@@ -5,6 +5,9 @@ open System.Text.RegularExpressions
 open Argu
 open SharpYaml
 
+exception InvalidCli of string
+
+
 module Os =
     let WithDir p =
         let old = Directory.GetCurrentDirectory()
@@ -138,7 +141,8 @@ let readYaml (pth: string) =
 
 let readConfig (pth: string) =
     let yaml = readYaml pth
-
+    if yaml.IsNone then do
+        raise <| InvalidCli (sprintf "Yaml parsing failed for %s" pth)
     let mods = yaml.Value.Modules |> Seq.map ModuleSpec.FromYaml
     let rules = yaml.Value.Rules |> Seq.map RuleSpec.FromYaml
     mods, rules
@@ -257,7 +261,6 @@ with
 
 
 
-exception InvalidCli of string
 
 let handleCli (res: ParseResults<CLIArguments>) =
     let dir = res.GetResult(<@ Dir @>, ".")
