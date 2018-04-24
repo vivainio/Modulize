@@ -217,6 +217,8 @@ let checkRules ruleSpec (modSpec: ModuleSpec seq) =
     let unknownModules =
         Set.difference referencedModules existingModules
     unknownModules |> Seq.iter (printfn "Uknown module: %s")
+    Set.isEmpty unknownModules
+
 let findTargets ruleSpec modules =
     let targets =
         matchRules (modules
@@ -236,6 +238,7 @@ type CLIArguments =
     | Files
     | Leftover
     | Verbose
+    | Check
 with
     interface IArgParserTemplate with
         member s.Usage =
@@ -250,6 +253,7 @@ with
             | Files -> "Show list of modules and associated files"
             | Leftover -> "Show unrecognized files"
             | Verbose -> "Log diagnostics to console"
+            | Check -> "Just check configuration validity"
 
 
 
@@ -270,6 +274,14 @@ let handleCli (res: ParseResults<CLIArguments>) =
 
     let modSpec, ruleSpec = readConfig (res.TryGetResult(<@ Config @>) |> ensureFile "--config")
 
+    let rulesOk = checkRules ruleSpec modSpec
+    
+    if res.Contains <@ Check @> then do
+        match rulesOk with
+        | false -> raise <| InvalidCli "Rules validation error, not proceeding."
+        | true -> raise <| InvalidCli "Module specification valid." // 'exception' for early exit
+
+ 
     use d = Os.WithDir dir
 
     let mutable fromRef = res.GetResult( <@ From @>, "")
@@ -286,7 +298,6 @@ let handleCli (res: ParseResults<CLIArguments>) =
         raise <| InvalidCli("Need to specify either --commit or --from and --to")
 
     let modules, leftovers, files = scanModules modSpec fromRef toRef
-    checkRules ruleSpec modSpec
     if res.Contains <@ Modules @> then
         modules |> Seq.iter (fst >> (printfn "%s"))
     if res.Contains <@ Targets @> then
